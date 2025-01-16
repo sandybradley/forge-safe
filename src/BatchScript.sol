@@ -95,8 +95,7 @@ abstract contract BatchScript is Script {
 
     modifier isBatch(address safe_) {
         // Set the chain ID
-        Chain memory chain = getChain(vm.envString("CHAIN"));
-        chainId = chain.chainId;
+        chainId = getChainID();
 
         // Set the Safe API base URL and multisend address based on chain
         if (chainId == 1) {
@@ -114,6 +113,9 @@ abstract contract BatchScript is Script {
         } else if (chainId == 43114) {
             SAFE_API_BASE_URL = "https://safe-transaction-avalanche.safe.global/api/v1/safes/";
             SAFE_MULTISEND_ADDRESS = 0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761;
+        } else if (chainId == 80084) {
+            SAFE_API_BASE_URL = "https://transaction-bartio.safe.berachain.com/api/v1/safes/";
+            SAFE_MULTISEND_ADDRESS = 0x94092182D03fE8517A0345c455caA8047f9feb5b;
         } else {
             revert("Unsupported chain");
         }
@@ -133,6 +135,14 @@ abstract contract BatchScript is Script {
 
         // Run batch
         _;
+    }
+
+    function getChainID() external view returns (uint256) {
+        uint256 id;
+        assembly {
+            id := chainid()
+        }
+        return id;
     }
 
     // Functions to consume in a script
