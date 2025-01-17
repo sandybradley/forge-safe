@@ -137,7 +137,7 @@ abstract contract BatchScript is Script {
         _;
     }
 
-    function getChainID() external view returns (uint256) {
+    function getChainID() public view returns (uint256) {
         uint256 id;
         assembly {
             id := chainid()
