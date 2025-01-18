@@ -232,6 +232,8 @@ abstract contract BatchScript is Script {
         // Get the typed data to sign
         string memory typedData = _getTypedData(safe_, batch_);
 
+        vm.writeJson(typedData, "./batch-output.json");
+
         // Construct the sign command
         string memory commandStart = "cast wallet sign ";
         string memory wallet;
@@ -250,7 +252,7 @@ abstract contract BatchScript is Script {
         } else {
             revert("Unsupported wallet type");
         }
-        string memory commandEnd = "--data ";
+        string memory commandEnd = "--data --from-file ";
 
         // Sign the typed data from the CLI and get the signature
         string[] memory inputs = new string[](3);
@@ -260,14 +262,14 @@ abstract contract BatchScript is Script {
             commandStart,
             wallet,
             commandEnd,
-            "'",
-            typedData,
-            "'"
+            "./batch-output.json"
         );
         bytes memory signature = vm.ffi(inputs);
 
         // Set the signature on the batch
         batch_.signature = signature;
+
+        vm.removeFile("./batch-output.json");
 
         return batch_;
     }
@@ -292,10 +294,12 @@ abstract contract BatchScript is Script {
         placeholder.serialize("signature", batch_.signature);
         string memory payload = placeholder.serialize("sender", msg.sender);
 
+        vm.writeJson(payload,"./temp-payload.json");
+
         // Send batch
         (uint256 status, bytes memory data) = endpoint.post(
             _getHeaders(),
-            payload
+            "@temp-payload.json"
         );
 
         if (status == 201) {
@@ -304,6 +308,8 @@ abstract contract BatchScript is Script {
             console2.log(string(data));
             revert("Send batch failed!");
         }
+
+        vm.removeFile("./temp-payload.json");
     }
 
     // Computes the EIP712 hash of a Safe transaction.
@@ -422,10 +428,46 @@ abstract contract BatchScript is Script {
         return payload;
     }
 
+    // function _stripSlashQuotes(
+    //     string memory str_
+    // ) private returns (string memory) {
+    //     // Remove slash quotes from string
+    //     string memory command = string.concat(
+    //         "sed 's/",
+    //         '\\\\"/"',
+    //         "/g; s/",
+    //         '\\"',
+    //         "\\[/\\[/g; s/",
+    //         '\\]\\"',
+    //         "/\\]/g; s/",
+    //         '\\"',
+    //         "{/{/g; s/",
+    //         '}\\"',
+    //         "/}/g;' <<< "
+    //     );
+
+    //     string[] memory inputs = new string[](3);
+    //     inputs[0] = "bash";
+    //     inputs[1] = "-c";
+    //     inputs[2] = string.concat(command, "'", str_, "'");
+    //     bytes memory res = vm.ffi(inputs);
+
+    //     return string(res);
+    // }
+
     function _stripSlashQuotes(
         string memory str_
     ) private returns (string memory) {
-        // Remove slash quotes from string
+        // Write the input string to a temporary file
+        string memory tempFile = "./temp_input.txt";
+        // string[] memory staging = new string[](3);
+        // staging[0]= "bash";
+        // staging[1] = "-c";
+        // staging[2] = string.concat("echo -n ", str_, " > ", tempFile);
+        // vm.ffi(staging);
+        vm.writeFile(tempFile, str_);
+
+        // Construct the sed command using the temporary file
         string memory command = string.concat(
             "sed 's/",
             '\\\\"/"',
@@ -437,14 +479,18 @@ abstract contract BatchScript is Script {
             '\\"',
             "{/{/g; s/",
             '}\\"',
-            "/}/g;' <<< "
+            "/}/g;' ",
+            tempFile
         );
 
+        // Execute the sed command and read the result
         string[] memory inputs = new string[](3);
         inputs[0] = "bash";
         inputs[1] = "-c";
-        inputs[2] = string.concat(command, "'", str_, "'");
+        inputs[2] = command;
         bytes memory res = vm.ffi(inputs);
+
+        vm.removeFile(tempFile);
 
         return string(res);
     }
