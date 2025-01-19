@@ -500,16 +500,50 @@ abstract contract BatchScript is Script {
             _getSafeAPIEndpoint(safe_),
             "?limit=1"
         );
-        (uint256 status, bytes memory data) = endpoint.get();
+        // (uint256 status, bytes memory data) = endpoint.get();
+        (uint256 status, string memory dataFile) = curl(endpoint, "", "GET");
         if (status == 200) {
-            string memory resp = string(data);
-            string[] memory results;
-            results = resp.readStringArray(".results");
-            if (results.length == 0) return 0;
-            return resp.readUint(".results[0].nonce") + 1;
+            // string memory resp = string(data);
+            // string[] memory results;
+            // results = resp.readStringArray(".results");
+            // if (results.length == 0) return 0;
+            // return resp.readUint(".results[0].nonce") + 1;
+            string memory json = vm.readFile(dataFile);
+            uint256 lastNonce = json.readUint(".results[0].nonce");
+            return lastNonce + 1;
         } else {
             revert("Get nonce failed!");
         }
+    }
+
+    function curl(string memory self, string memory body, string memory method)
+        internal
+        returns (uint256 status, string memory data)
+    {
+        string memory scriptStart = 'response=$(curl -s -w "\\n%{http_code}" ';
+        string memory scriptEnd = '); status=$(tail -n1 <<< "$response"); data=$(sed "$ d" <<< "$response");data=$(echo "$data" | tr -d "\\n"); echo "$data" > tmp-curl-response.json; cast abi-encode "response(uint256,string)" "$status" "tmp-curl-response.json";';
+
+        string memory curlParams = "";
+
+        // for (uint256 i = 0; i < headers.length; i++) {
+        //     curlParams = string.concat(curlParams, '-H "', headers[i], '" ');
+        // }
+
+        curlParams = string.concat(curlParams, " -X ", method, " ");
+
+        if (bytes(body).length > 0) {
+            curlParams = string.concat(curlParams, ' -d \'', body, '\' ');
+        }
+
+        string memory quotedURL = string.concat('"', self, '"');
+
+        string[] memory inputs = new string[](3);
+        inputs[0] = "bash";
+        inputs[1] = "-c";
+        inputs[2] = string.concat(scriptStart, curlParams, quotedURL, scriptEnd, "");
+        bytes memory res = vm.ffi(inputs);
+
+        (status, data) = abi.decode(res, (uint256, string));
     }
 
     function _getSafeAPIEndpoint(
