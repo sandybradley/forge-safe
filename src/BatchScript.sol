@@ -506,12 +506,13 @@ abstract contract BatchScript is Script {
         // (uint256 status, bytes memory data) = endpoint.get();
         (uint256 status, string memory dataFile) = curl(endpoint, "", "GET");
         if (status == 200) {
-            // string memory resp = string(data);
-            // string[] memory results;
-            // results = resp.readStringArray(".results");
-            // if (results.length == 0) return 0;
-            // return resp.readUint(".results[0].nonce") + 1;
+            
             string memory json = vm.readFile(dataFile);
+            // Check if results array is empty
+            uint256 resultsCount = json.readUint(".count");
+            if (resultsCount == 0) {
+                return 0;
+            }
             uint256 lastNonce = json.readUint(".results[0].nonce");
             return lastNonce + 1;
         } else {
