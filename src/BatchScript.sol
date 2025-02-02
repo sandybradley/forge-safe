@@ -235,6 +235,8 @@ abstract contract BatchScript is Script {
         // Get the typed data to sign
         string memory typedData = _getTypedData(safe_, batch_);
 
+        vm.writeJson(typedData, "./batch-output.json");
+
         // Construct the sign command
         string memory commandStart = "cast wallet sign ";
         string memory wallet;
@@ -253,7 +255,7 @@ abstract contract BatchScript is Script {
         } else {
             revert("Unsupported wallet type");
         }
-        string memory commandEnd = "--data ";
+        string memory commandEnd = "--data --from-file ";
 
         // Sign the typed data from the CLI and get the signature
         string[] memory inputs = new string[](3);
@@ -263,14 +265,14 @@ abstract contract BatchScript is Script {
             commandStart,
             wallet,
             commandEnd,
-            "'",
-            typedData,
-            "'"
+            "./batch-output.json"
         );
         bytes memory signature = vm.ffi(inputs);
 
         // Set the signature on the batch
         batch_.signature = signature;
+
+        vm.removeFile("./batch-output.json");
 
         return batch_;
     }
@@ -295,10 +297,12 @@ abstract contract BatchScript is Script {
         placeholder.serialize("signature", batch_.signature);
         string memory payload = placeholder.serialize("sender", msg.sender);
 
+        vm.writeJson(payload,"./temp-payload.json");
+
         // Send batch
         (uint256 status, bytes memory data) = endpoint.post(
             _getHeaders(),
-            payload
+            "@temp-payload.json"
         );
 
         if (status == 201) {
@@ -307,6 +311,8 @@ abstract contract BatchScript is Script {
             console2.log(string(data));
             revert("Send batch failed!");
         }
+
+        vm.removeFile("./temp-payload.json");
     }
 
     // Computes the EIP712 hash of a Safe transaction.
@@ -425,10 +431,46 @@ abstract contract BatchScript is Script {
         return payload;
     }
 
+    // function _stripSlashQuotes(
+    //     string memory str_
+    // ) private returns (string memory) {
+    //     // Remove slash quotes from string
+    //     string memory command = string.concat(
+    //         "sed 's/",
+    //         '\\\\"/"',
+    //         "/g; s/",
+    //         '\\"',
+    //         "\\[/\\[/g; s/",
+    //         '\\]\\"',
+    //         "/\\]/g; s/",
+    //         '\\"',
+    //         "{/{/g; s/",
+    //         '}\\"',
+    //         "/}/g;' <<< "
+    //     );
+
+    //     string[] memory inputs = new string[](3);
+    //     inputs[0] = "bash";
+    //     inputs[1] = "-c";
+    //     inputs[2] = string.concat(command, "'", str_, "'");
+    //     bytes memory res = vm.ffi(inputs);
+
+    //     return string(res);
+    // }
+
     function _stripSlashQuotes(
         string memory str_
     ) private returns (string memory) {
-        // Remove slash quotes from string
+        // Write the input string to a temporary file
+        string memory tempFile = "./temp_input.txt";
+        // string[] memory staging = new string[](3);
+        // staging[0]= "bash";
+        // staging[1] = "-c";
+        // staging[2] = string.concat("echo -n ", str_, " > ", tempFile);
+        // vm.ffi(staging);
+        vm.writeFile(tempFile, str_);
+
+        // Construct the sed command using the temporary file
         string memory command = string.concat(
             "sed 's/",
             '\\\\"/"',
@@ -440,14 +482,18 @@ abstract contract BatchScript is Script {
             '\\"',
             "{/{/g; s/",
             '}\\"',
-            "/}/g;' <<< "
+            "/}/g;' ",
+            tempFile
         );
 
+        // Execute the sed command and read the result
         string[] memory inputs = new string[](3);
         inputs[0] = "bash";
         inputs[1] = "-c";
-        inputs[2] = string.concat(command, "'", str_, "'");
+        inputs[2] = command;
         bytes memory res = vm.ffi(inputs);
+
+        vm.removeFile(tempFile);
 
         return string(res);
     }
@@ -457,16 +503,50 @@ abstract contract BatchScript is Script {
             _getSafeAPIEndpoint(safe_),
             "?limit=1"
         );
-        (uint256 status, bytes memory data) = endpoint.get();
+        // (uint256 status, bytes memory data) = endpoint.get();
+        (uint256 status, string memory dataFile) = curl(endpoint, "", "GET");
         if (status == 200) {
-            string memory resp = string(data);
-            string[] memory results;
-            results = resp.readStringArray(".results");
-            if (results.length == 0) return 0;
-            return resp.readUint(".results[0].nonce") + 1;
+            // string memory resp = string(data);
+            // string[] memory results;
+            // results = resp.readStringArray(".results");
+            // if (results.length == 0) return 0;
+            // return resp.readUint(".results[0].nonce") + 1;
+            string memory json = vm.readFile(dataFile);
+            uint256 lastNonce = json.readUint(".results[0].nonce");
+            return lastNonce + 1;
         } else {
             revert("Get nonce failed!");
         }
+    }
+
+    function curl(string memory self, string memory body, string memory method)
+        internal
+        returns (uint256 status, string memory data)
+    {
+        string memory scriptStart = 'response=$(curl -s -w "\\n%{http_code}" ';
+        string memory scriptEnd = '); status=$(tail -n1 <<< "$response"); data=$(sed "$ d" <<< "$response");data=$(echo "$data" | tr -d "\\n"); echo "$data" > tmp-curl-response.json; cast abi-encode "response(uint256,string)" "$status" "tmp-curl-response.json";';
+
+        string memory curlParams = "";
+
+        // for (uint256 i = 0; i < headers.length; i++) {
+        //     curlParams = string.concat(curlParams, '-H "', headers[i], '" ');
+        // }
+
+        curlParams = string.concat(curlParams, " -X ", method, " ");
+
+        if (bytes(body).length > 0) {
+            curlParams = string.concat(curlParams, ' -d \'', body, '\' ');
+        }
+
+        string memory quotedURL = string.concat('"', self, '"');
+
+        string[] memory inputs = new string[](3);
+        inputs[0] = "bash";
+        inputs[1] = "-c";
+        inputs[2] = string.concat(scriptStart, curlParams, quotedURL, scriptEnd, "");
+        bytes memory res = vm.ffi(inputs);
+
+        (status, data) = abi.decode(res, (uint256, string));
     }
 
     function _getSafeAPIEndpoint(
