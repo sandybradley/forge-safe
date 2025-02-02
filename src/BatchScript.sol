@@ -116,6 +116,9 @@ abstract contract BatchScript is Script {
         } else if (chainId == 80084) {
             SAFE_API_BASE_URL = "https://transaction-bartio.safe.berachain.com/api/v1/safes/";
             SAFE_MULTISEND_ADDRESS = 0x94092182D03fE8517A0345c455caA8047f9feb5b;
+        } else if (chainId == 80094) {
+            SAFE_API_BASE_URL = "https://transaction.bp.w3us.site/";
+            SAFE_MULTISEND_ADDRESS = 0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761;
         } else {
             revert("Unsupported chain");
         }
